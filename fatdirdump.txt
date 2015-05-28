@@ -1,0 +1,115 @@
+Entry 0: LFN1 "apps"
+  Raw Data        :
+   41 61 00 70 00 70 00 73 00 00 00 0F 00 A6 FF FF Aa.p.p.s........
+   FF FF FF FF FF FF FF FF FF FF 00 00 FF FF FF FF ................
+
+Entry 1: SFN "APPS" <DIR>
+  First Cluster   : 2
+  Size            : 0
+  Create Date/Time: 05/27/2015 14:35:13
+  Access Date     : 05/27/2015
+  Write Date/Time : 05/27/2015 14:35:12
+  Raw Data        :
+   41 50 50 53 20 20 20 20 20 20 20 10 00 64 66 74 APPS       ..dft
+   BB 46 BB 46 00 00 66 74 BB 46 02 00 00 00 00 00 .F.F..ft.F......
+
+Entry 2: LFN1 "Machine.cpp"
+  Raw Data        :
+   41 4D 00 61 00 63 00 68 00 69 00 0F 00 6F 6E 00 AM.a.c.h.i...on.
+   65 00 2E 00 63 00 70 00 70 00 00 00 00 00 FF FF e...c.p.p.......
+
+Entry 3: SFN "MACHINE.CPP" <FILE>
+  First Cluster   : 20
+  Size            : 25526
+  Create Date/Time: 05/27/2015 14:36:10
+  Access Date     : 05/27/2015
+  Write Date/Time : 05/27/2015 14:36:10
+  Raw Data        :
+   4D 41 43 48 49 4E 45 20 43 50 50 00 00 00 85 74 MACHINE CPP....t
+   BB 46 BB 46 00 00 85 74 BB 46 14 00 B6 63 00 00 .F.F...t.F...c..
+
+Entry 4: LFN1 "Machine.h"
+  Raw Data        :
+   41 4D 00 61 00 63 00 68 00 69 00 0F 00 E8 6E 00 AM.a.c.h.i....n.
+   65 00 2E 00 68 00 00 00 FF FF 00 00 FF FF FF FF e...h...........
+
+Entry 5: SFN "MACHINE.H" <FILE>
+  First Cluster   : 45
+  Size            : 1856
+  Create Date/Time: 05/27/2015 14:36:14
+  Access Date     : 05/27/2015
+  Write Date/Time : 05/27/2015 14:36:14
+  Raw Data        :
+   4D 41 43 48 49 4E 45 20 48 20 20 00 00 00 87 74 MACHINE H  ....t
+   BB 46 BB 46 00 00 87 74 BB 46 2D 00 40 07 00 00 .F.F...t.F-.@...
+
+Entry 6: LFN1 "Makefile"
+  Raw Data        :
+   41 4D 00 61 00 6B 00 65 00 66 00 0F 00 C1 69 00 AM.a.k.e.f....i.
+   6C 00 65 00 00 00 FF FF FF FF 00 00 FF FF FF FF l.e.............
+
+Entry 7: SFN "MAKEFILE" <FILE>
+  First Cluster   : 47
+  Size            : 1537
+  Create Date/Time: 05/27/2015 14:36:23
+  Access Date     : 05/27/2015
+  Write Date/Time : 05/27/2015 14:36:22
+  Raw Data        :
+   4D 41 4B 45 46 49 4C 45 20 20 20 00 00 64 8B 74 MAKEFILE   ..d.t
+   BB 46 BB 46 00 00 8B 74 BB 46 2F 00 01 06 00 00 .F.F...t.F/.....
+
+Entry 8: LFN2 "e.h"
+  Raw Data        :
+   42 65 00 2E 00 68 00 00 00 FF FF 0F 00 C4 FF FF Be...h..........
+   FF FF FF FF FF FF FF FF FF FF 00 00 FF FF FF FF ................
+
+Entry 9: LFN1 "VirtualMachin"
+  Raw Data        :
+   01 56 00 69 00 72 00 74 00 75 00 0F 00 C4 61 00 .V.i.r.t.u....a.
+   6C 00 4D 00 61 00 63 00 68 00 00 00 69 00 6E 00 l.M.a.c.h...i.n.
+
+Entry 10: SFN "VIRTUA~1.H" <FILE>
+  First Cluster   : 49
+  Size            : 6358
+  Create Date/Time: 05/27/2015 14:36:34
+  Access Date     : 05/27/2015
+  Write Date/Time : 05/27/2015 14:36:34
+  Raw Data        :
+   56 49 52 54 55 41 7E 31 48 20 20 00 00 00 91 74 VIRTUA~1H  ....t
+   BB 46 BB 46 00 00 91 74 BB 46 31 00 D6 18 00 00 .F.F...t.F1.....
+
+Entry 11: LFN2 "eUtils.c"
+  Raw Data        :
+   42 65 00 55 00 74 00 69 00 6C 00 0F 00 83 73 00 Be.U.t.i.l....s.
+   2E 00 63 00 00 00 FF FF FF FF 00 00 FF FF FF FF ..c.............
+
+Entry 12: LFN1 "VirtualMachin"
+  Raw Data        :
+   01 56 00 69 00 72 00 74 00 75 00 0F 00 83 61 00 .V.i.r.t.u....a.
+   6C 00 4D 00 61 00 63 00 68 00 00 00 69 00 6E 00 l.M.a.c.h...i.n.
+
+Entry 13: SFN "VIRTUA~1.C" <FILE>
+  First Cluster   : 56
+  Size            : 11384
+  Create Date/Time: 05/27/2015 14:36:45
+  Access Date     : 05/27/2015
+  Write Date/Time : 05/27/2015 14:36:44
+  Raw Data        :
+   56 49 52 54 55 41 7E 31 43 20 20 00 00 64 96 74 VIRTUA~1C  ..d.t
+   BB 46 BB 46 00 00 96 74 BB 46 38 00 78 2C 00 00 .F.F...t.F8.x,..
+
+Entry 14: LFN1 "main.c"
+  Raw Data        :
+   41 6D 00 61 00 69 00 6E 00 2E 00 0F 00 41 63 00 Am.a.i.n.....Ac.
+   00 00 FF FF FF FF FF FF FF FF 00 00 FF FF FF FF ................
+
+Entry 15: SFN "MAIN.C" <FILE>
+  First Cluster   : 68
+  Size            : 3130
+  Create Date/Time: 05/27/2015 14:36:55
+  Access Date     : 05/27/2015
+  Write Date/Time : 05/27/2015 14:36:54
+  Raw Data        :
+   4D 41 49 4E 20 20 20 20 43 20 20 00 00 64 9B 74 MAIN    C  ..d.t
+   BB 46 BB 46 00 00 9B 74 BB 46 44 00 3A 0C 00 00 .F.F...t.FD.:...
+

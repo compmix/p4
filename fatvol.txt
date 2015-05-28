@@ -1,0 +1,22 @@
+OEM Name           : "UCDOSFAT"
+Bytes Per Sector   : 512
+Sectors Per Cluster: 2
+Reserved Sectors   : 1
+FAT Count          : 2
+Root Entry         : 512
+Sector Count 16    : 0
+Media              : 248
+FAT Size 16        : 17
+Sectors Per Track  : 32
+Head Count         : 64
+Hidden Sector Count: 0
+Sector Count 32    : 8259
+Drive Number       : 0
+Boot Signature     : 00
+Volume ID          : 2AD9F1A7
+Volume Label       : "           "
+File System Type   : "FAT16   "
+Root Dir Sectors   : 32
+First Root Sector  : 35
+First Data Sector  : 67
+Cluster Count      : 4096
