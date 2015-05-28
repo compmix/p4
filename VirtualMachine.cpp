@@ -154,7 +154,7 @@ TCB *currentThread = new TCB; //global current running thread
 vector<MB*> mutexList; //to hold mutexs
 vector<TCB*> threadList; //global ptr list to hold threads
 vector<MPB*> memPoolList; //global ptr list to hold memory pools
-vector<uint16_t> FATTablesList; //global vector for fat tables
+vector<uint16_t> FATTable; //global vector for fat tables
 
 queue<TCB*> highPrio; //high priority queue
 queue<TCB*> normPrio; //normal priority queue
@@ -404,14 +404,23 @@ uint8_t* readSector(uint32_t sector) {
     Scheduler();
 
 /*
-                                printf(" 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31\n");
-                                for(int j = 0; j < 512; ++j) printf("%.02X ", ((uint8_t *)sharedMem)[j]);
+                                for(int j = 0; j < 32; ++j) printf("%2d ", j); printf("\n");
+                                for(int j = 0; j < 512; ++j) printf("%02X ", ((uint8_t *)sharedMem)[j]);
 */
 
     sectorData = (uint8_t*)sharedMem;
 
     VMMemoryPoolDeallocate(0, &sharedMem);
     return sectorData;
+}
+
+uint16_t* u8tou16(uint8_t *sector, uint32_t size)
+{
+    uint16_t *newArr = new uint16_t[size/2];
+    for(int i = 0; i < size/2; i += 2)
+        newArr[i/2] = sector[i+1] << 8 | sector[i];
+
+    return newArr;
 }
 
 unsigned int bytesToUnsigned(uint8_t* BPB, uint16_t offset, uint16_t size)
@@ -513,13 +522,28 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
         cout << "FirstDataSector: " << FirstDataSector << endl;
         cout << "ClusterCount: " << ClusterCount << endl;
 
+    // for all FAT sectors
+    for(uint32_t i = 0; i < BPB->FATSz16; ++i) {
+        uint32_t sector = i + 1;
+        uint8_t *fatSector = readSector(sector); // convert to 2 byte
 
+        for(int j = 0; j < 256; j += 2)
+            FATTable.push_back(fatSector[j+1] << 8 | fatSector[j]);           // store raw fat table
+    }
+
+    /*         // dump FAT table
+        for(int j = 0; j < 16; ++j) printf("%4d ", j); printf("\n");
+        for(int j = 0; j < 512; ++j) printf("%04X ", FATTable[j]);
+    */
 
         // for all root sectors
     for(uint32_t i = 0; i < RootDirectorySectors; ++i) {
         uint32_t sector = i + FirstRootSector;       // starts at
 
         uint8_t *rootSector = readSector(sector);
+
+        for(int j = 0; j < 32; ++j) printf("%2d ", j); printf("\n");
+        for(int j = 0; j < 512; ++j) printf("%02X ", rootSector[j]);
 
         for(uint32_t secOffset = 0; secOffset < 512; secOffset += 32) {      // 16 entries per sector
             if(rootSector[secOffset] == 0x00)        // stop, no more entries
@@ -538,14 +562,10 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
             myEntry->DIR_FileSize = rootSector[secOffset + 31] << 24 | rootSector[secOffset + 30] << 16 | rootSector[secOffset + 29] << 8 | rootSector[secOffset + 28];
             
             ROOT.push_back(myEntry);    // save
-            cerr << secOffset / 32 << " " << (char*)myEntry->DIR_Name << " attr: " << hex << (int)myEntry->DIR_Attr << dec << endl;
+            //cerr << secOffset / 32 << " " << (char*)myEntry->DIR_Name << " attr: " << hex << (int)myEntry->DIR_Attr << dec << endl;
+            printf("clusLO: %04X Filesize: %d \n", myEntry->DIR_FstClusLO, myEntry->DIR_FileSize);
         } // for each entry
-    }   // for each sector
-
-    afterRoot:
-
-
-
+    }   afterRoot: // for each sector
     
 
     VMMain(argc, argv); //call to vmmain
@@ -570,7 +590,15 @@ TVMStatus VMDirectoryOpen(const char *dirname, int *dirdescriptor)
     if(dirname == NULL || dirdescriptor == NULL)
         return VM_STATUS_ERROR_INVALID_PARAMETER;
 
+    cerr << "dirname: " << dirname << endl;
 
+    // look through root directory for this directory.
+    for(vector<RootEntry*>::iterator itr = ROOT.begin(); itr != ROOT.end(); ++itr) {
+        if((*itr)->DIR_Name == dirname){
+            cerr << "location: " << hex << (*itr)->DIR_FstClusLO << endl;
+        }
+    }
+    
 
 
     MachineResumeSignals(&OldState); //resume signals
@@ -601,6 +629,18 @@ TVMStatus VMDirectoryChange(const char *path)
 {
     return 0;
 } //VMDirectoryChange()
+
+TVMStatus VMDirectoryCreate(const char *dirname)
+{
+
+    return VM_STATUS_SUCCESS;
+} //VMDirectoryCreate
+
+TVMStatus VMDirectoryUnlink(const char *path)
+{
+
+    return VM_STATUS_SUCCESS;
+} //VMDirectoryUnlink
 
 //***************************************************************************//
 //MemoryPool Functions
