@@ -403,10 +403,10 @@ uint8_t* readSector(uint32_t sector) {
     currentThread->threadState = VM_THREAD_STATE_WAITING;
     Scheduler();
 
-/*
+    /*
                                 for(int j = 0; j < 32; ++j) printf("%2d ", j); printf("\n");
                                 for(int j = 0; j < 512; ++j) printf("%02X ", ((uint8_t *)sharedMem)[j]);
-*/
+    */
 
     sectorData = (uint8_t*)sharedMem;
 
@@ -531,10 +531,10 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
             FATTable.push_back(fatSector[j+1] << 8 | fatSector[j]);           // store raw fat table
     }
 
-    /*         // dump FAT table
+             // dump FAT table
         for(int j = 0; j < 16; ++j) printf("%4d ", j); printf("\n");
         for(int j = 0; j < 512; ++j) printf("%04X ", FATTable[j]);
-    */
+    
 
         // for all root sectors
     for(uint32_t i = 0; i < RootDirectorySectors; ++i) {
@@ -542,8 +542,8 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
 
         uint8_t *rootSector = readSector(sector);
 
-        for(int j = 0; j < 32; ++j) printf("%2d ", j); printf("\n");
-        for(int j = 0; j < 512; ++j) printf("%02X ", rootSector[j]);
+        //for(int j = 0; j < 32; ++j) printf("%2d ", j); printf("\n");
+        //for(int j = 0; j < 512; ++j) printf("%02X ", rootSector[j]);
 
         for(uint32_t secOffset = 0; secOffset < 512; secOffset += 32) {      // 16 entries per sector
             if(rootSector[secOffset] == 0x00)        // stop, no more entries
@@ -558,7 +558,6 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
             myEntry->DIR_WrtDate = rootSector[secOffset + 25] << 8 | rootSector[secOffset + 24];        // store wrtDate
             myEntry->DIR_WrtTime = rootSector[secOffset + 23] << 8 | rootSector[secOffset + 22];        // store wrtTime
             myEntry->DIR_FstClusLO = rootSector[secOffset + 27] << 8 | rootSector[secOffset + 26];      // store fstClusLO
-            // store filesize
             myEntry->DIR_FileSize = rootSector[secOffset + 31] << 24 | rootSector[secOffset + 30] << 16 | rootSector[secOffset + 29] << 8 | rootSector[secOffset + 28];
             
             ROOT.push_back(myEntry);    // save
@@ -567,6 +566,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
         } // for each entry
     }   afterRoot: // for each sector
     
+
 
     VMMain(argc, argv); //call to vmmain
 
@@ -601,18 +601,70 @@ TVMStatus VMDirectoryOpen(const char *dirname, int *dirdescriptor)
     
 
 
+
     MachineResumeSignals(&OldState); //resume signals
     return VM_STATUS_SUCCESS;
 } //VMDirectoryOpen()
 
 TVMStatus VMDirectoryClose(int dirdescriptor)
 {
-    return 0;
+    TMachineSignalState OldState; //local variable to suspend signals
+    MachineSuspendSignals(&OldState); //suspend signals
+
+
+    MachineResumeSignals(&OldState); //resume signals
+    return VM_STATUS_SUCCESS;
 } //VMDirectoryClose()
 
 TVMStatus VMDirectoryRead(int dirdescriptor, SVMDirectoryEntryRef dirent)
 {
-    return 0;
+    TMachineSignalState OldState; //local variable to suspend signals
+    MachineSuspendSignals(&OldState); //suspend signals
+
+    //ignore dirdescriptor for now, just do root
+
+    strcpy(dirent->DLongFileName, "bb");
+    strcpy(dirent->DShortFileName, "bloop");
+    dirent->DSize = 3132;
+
+    SVMDateTime test
+
+    test.DYear = 2014;
+    test.DMonth = 12;
+    test.DDay = 14;
+
+
+
+
+    dirent->DModify = test;
+
+
+/*typedef struct{
+    unsigned int DYear;
+    unsigned char DMonth;
+    unsigned char DDay;
+    unsigned char DHour;
+    unsigned char DMinute;
+    unsigned char DSecond;
+    unsigned char DHundredth;
+} SVMDateTime, *SVMDateTimeRef;
+
+typedef struct{
+    char DLongFileName[VM_FILE_SYSTEM_MAX_PATH];
+    char DShortFileName[VM_FILE_SYSTEM_SFN_SIZE];
+    unsigned int DSize;
+    unsigned char DAttributes;
+    SVMDateTime DCreate;
+    SVMDateTime DAccess;
+    SVMDateTime DModify;
+} SVMDirectoryEntry, *SVMDirectoryEntryRef;
+*/
+
+
+
+
+    MachineResumeSignals(&OldState); //resume signals
+    return VM_STATUS_SUCCESS;
 } //VMDirectoryRead()
 
 TVMStatus VMDirectoryRewind(int dirdescriptor)
@@ -622,7 +674,16 @@ TVMStatus VMDirectoryRewind(int dirdescriptor)
 
 TVMStatus VMDirectoryCurrent(char *abspath)
 {
-    return 0;
+    TMachineSignalState OldState; //local variable to suspend signals
+    MachineSuspendSignals(&OldState); //suspend signals
+
+    if(abspath == NULL)
+        return VM_STATUS_ERROR_INVALID_PARAMETER;
+
+    strcpy(abspath, "/");
+
+    MachineResumeSignals(&OldState); //resume signals
+    return VM_STATUS_SUCCESS;
 } //VMDirectoryCurrent()
 
 TVMStatus VMDirectoryChange(const char *path)
