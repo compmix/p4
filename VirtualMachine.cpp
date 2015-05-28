@@ -56,7 +56,7 @@ using namespace std;
 #define ATTR_VOLUME_ID      0x08
 #define ATTR_DIRECTORY      0x10
 #define ATTR_ARCHIVE        0x20
-#define ATTR_LONG_NAME      0x3F //(ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID)
+#define ATTR_LONG_NAME      0x0F //(ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID)
 
 extern "C"
 {
@@ -125,17 +125,17 @@ class RootEntry
 {
 public:
     char DIR_Name[11];
-    //DIR_Attr
+    uint8_t DIR_Attr;
     //DIR_NTRes
     //DIR_CrtTimeTenth
     //DIR_CrtTime
     //DIR_CrtDate
     //DIR_LstAccDate
     //DIR_FstClusHI
-    //DIR_WrtTime
-    //DIR_WrtDate
-    //DIR_FstClusLO
-
+    uint16_t DIR_WrtTime;
+    uint16_t DIR_WrtDate;
+    uint16_t DIR_FstClusLO;
+    uint32_t DIR_FileSize;
 };
 
 //***************************************************************************//
@@ -404,11 +404,8 @@ uint8_t* readSector(uint32_t sector) {
     Scheduler();
 
 /*
-                                //dump
                                 printf(" 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31\n");
-                                for(int j = 0; j < 512; ++j) {
-                                    printf("%.02X ", ((uint8_t *)sharedMem)[j]);    
-                                }
+                                for(int j = 0; j < 512; ++j) printf("%.02X ", ((uint8_t *)sharedMem)[j]);
 */
 
     sectorData = (uint8_t*)sharedMem;
@@ -479,18 +476,13 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
     memPoolList.push_back(VMMainMPB); //push main into mem pool list[1]
     
     //FAT STUFF
-    void *sharedMem = NULL; //uint8_t* fileImageData = NULL;
     MachineFileOpen(mount, O_RDWR, 0644, FileCallBack, currentThread); //call to open fat file
     currentThread->threadState = VM_THREAD_STATE_WAITING;
     Scheduler();
-
+    
     FATfd = currentThread->fileResult;  // fileResult holds fd
-    VMMemoryPoolAllocate(0, 512, &sharedMem);
-    MachineFileRead(FATfd, sharedMem, 512, FileCallBack, currentThread);
-    currentThread->threadState = VM_THREAD_STATE_WAITING;
-    Scheduler();
 
-    BPB->BPB = (uint8_t*)sharedMem; //new uint8_t[BPB_Size]; //first sector
+    BPB->BPB = readSector(0);       // sector 0 has BPB
     BPB->bytesPerSector = bytesToUnsigned(BPB->BPB, BPB_BytsPerSecOffset, BPB_BytsPerSec);
     BPB->sectorsPerCluster = bytesToUnsigned(BPB->BPB, BPB_SecPerClusOffset, BPB_SecPerClus);
     BPB->reservedSectorCount = bytesToUnsigned(BPB->BPB, BPB_RsvdSecCntOffset, BPB_RsvdSecCnt);
@@ -501,48 +493,12 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
     BPB->FATSz = BPB_NumFATS * BPB->FATSz16;
     BPB->ROOTSz = BPB->rootEntityCount * ROOT_EntSz / 512; //handout said divide by 512
 
-    VMMemoryPoolDeallocate(0, sharedMem);
-    
-
     FirstRootSector = BPB->reservedSectorCount + BPB_NumFATS * BPB->FATSz16;
     RootDirectorySectors = (BPB->rootEntityCount * 32)/512;
     FirstDataSector = FirstRootSector + RootDirectorySectors;
     ClusterCount = (BPB->totalSectors32 - FirstDataSector)/BPB->sectorsPerCluster;
 
 
-        // for every root sector
-        for(uint32_t i = 0; i < BPB->rootEntityCount; ++i) {
-            uint32_t sector = i + 35;
-
-            uint8_t *rootEntry = readSector(sector);
-
-                                //dump
-                                printf(" 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31\n");
-                                for(int j = 0; j < 512; ++j) {
-                                    printf("%.02X ", rootEntry[j]);    
-                                }
-
-            RootEntry *myEntry = new RootEntry;
-
-            if(rootEntry[i * 32] == 0x00)        // stop, no more entries
-              break;
-
-            // only read short filenames
-            if(rootEntry[11] != ATTR_LONG_NAME) {
-                for(int j = 0; j < 11; ++j){
-                    myEntry->DIR_Name[j] = rootEntry[j + i * 32];
-                }
-                cerr << i << " " << (char*)myEntry->DIR_Name << endl;
-            }
-
-            
-            ROOT.push_back(myEntry);
-        }
-
-
-
-
-    
         cout << "BPB_BytsPerSec: " << BPB->bytesPerSector << endl;
         cout << "BPB_SecPerClus: " << BPB->sectorsPerCluster << endl;
         cout << "BPB_RsvdSecCnt: " << BPB->reservedSectorCount << endl;
@@ -558,6 +514,39 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
         cout << "ClusterCount: " << ClusterCount << endl;
 
 
+
+        // for all root sectors
+    for(uint32_t i = 0; i < RootDirectorySectors; ++i) {
+        uint32_t sector = i + FirstRootSector;       // starts at
+
+        uint8_t *rootSector = readSector(sector);
+
+        for(uint32_t secOffset = 0; secOffset < 512; secOffset += 32) {      // 16 entries per sector
+            if(rootSector[secOffset] == 0x00)        // stop, no more entries
+                goto afterRoot;
+            if(rootSector[secOffset + 11] == ATTR_LONG_NAME)    // skip longfile names
+                continue;
+
+            RootEntry *myEntry = new RootEntry;
+            
+            myEntry->DIR_Attr = rootSector[secOffset + 11];        // store attribute
+            for(int k = 0; k < 11; ++k) myEntry->DIR_Name[k] = rootSector[secOffset + k];   // store filename (short)
+            myEntry->DIR_WrtDate = rootSector[secOffset + 25] << 8 | rootSector[secOffset + 24];        // store wrtDate
+            myEntry->DIR_WrtTime = rootSector[secOffset + 23] << 8 | rootSector[secOffset + 22];        // store wrtTime
+            myEntry->DIR_FstClusLO = rootSector[secOffset + 27] << 8 | rootSector[secOffset + 26];      // store fstClusLO
+            // store filesize
+            myEntry->DIR_FileSize = rootSector[secOffset + 31] << 24 | rootSector[secOffset + 30] << 16 | rootSector[secOffset + 29] << 8 | rootSector[secOffset + 28];
+            
+            ROOT.push_back(myEntry);    // save
+            cerr << secOffset / 32 << " " << (char*)myEntry->DIR_Name << " attr: " << hex << (int)myEntry->DIR_Attr << dec << endl;
+        } // for each entry
+    }   // for each sector
+
+    afterRoot:
+
+
+
+    
 
     VMMain(argc, argv); //call to vmmain
 
