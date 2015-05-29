@@ -624,8 +624,8 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
         for(int j = 0; j < 256; j += 2)
             FATTable.push_back(fatSector[j+1] << 8 | fatSector[j]);           // store raw fat table
     }
-
     //dumpFAT();
+
 
         // for all root sectors
     for(uint32_t i = 0; i < RootDirectorySectors; ++i) {
@@ -635,9 +635,8 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
             break;
 
     }   
+    //dumpROOT();
 
-    
-    dumpROOT();
 
     VMMain(argc, argv); //call to vmmain
 
@@ -1227,6 +1226,7 @@ TVMStatus VMMutexRelease(TVMMutexID mutex)
 //File Functions
 //***************************************************************************//
 
+//If you're not doing extra credit, you only need to search through your root directory. If the requested file can't be found in the root directory, you return VM_STATUS_FAILURE.
 TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescriptor)
 {
     TMachineSignalState OldState; //local variable to suspend signals
@@ -1236,7 +1236,6 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
         return VM_STATUS_ERROR_INVALID_PARAMETER;
 
     MachineFileOpen(filename, flags, mode, FileCallBack, currentThread);
-    
     currentThread->threadState = VM_THREAD_STATE_WAITING; //set to wait
     Scheduler(); //now we schedule threads so that we can let other threads work
 
