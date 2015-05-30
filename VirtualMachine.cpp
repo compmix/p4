@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <string.h>
+#include <cstdio>
 extern const TVMMemoryPoolID VM_MEMORY_POOL_ID_SYSTEM = 1;
 using namespace std;
 
@@ -444,7 +445,7 @@ uint8_t* readSector(uint32_t sector) {
 uint16_t* u8tou16(uint8_t *sector, uint32_t size)
 {
     uint16_t *newArr = new uint16_t[size/2];
-    for(int i = 0; i < size/2; i += 2)
+    for(uint32_t i = 0; i < size/2; i += 2)
         newArr[i/2] = sector[i+1] << 8 | sector[i];
 
     return newArr;
@@ -1227,6 +1228,22 @@ TVMStatus VMMutexRelease(TVMMutexID mutex)
 //***************************************************************************//
 
 //If you're not doing extra credit, you only need to search through your root directory. If the requested file can't be found in the root directory, you return VM_STATUS_FAILURE.
+/*
+    use getabspath(abs, cur, path);
+    check if exists using getfilename/getdirname
+    find if exists caseinsensitive
+        check if mode == o_create
+        
+    open allcaps
+    get firstdatacluster/size
+    filepointer is offset within the file
+    vector hold open file information
+    currsize (might be update later)
+
+    add to openfilevector, filedescriptor
+
+
+*/
 TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescriptor)
 {
     TMachineSignalState OldState; //local variable to suspend signals
@@ -1261,6 +1278,22 @@ TVMStatus VMFileClose(int filedescriptor)
     return VM_STATUS_SUCCESS;
 } //VMFileClose()
 
+
+/*
+    clustype getClus() {
+        FirstDataSect(clusnum - 2) * secperclus;
+
+    }
+
+*/
+/*
+    clusterSkip = FP/clussize(bytes)    //
+    clusOff = FP % clussize             //offset within the cluster to start reading from
+    clusNum = findClus(firstclus, clusSkip)
+    clus = getClus(ClusNum)             // also check if it has been loaded already
+    clus should have dirtybit, vector of uint8_t
+    memcpy from clusbuff to databuff a min(*length, Clussize - clusoff) // how many bytes left in curr cluster to read from
+*/
 TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
 {
     TMachineSignalState OldState; //local variable to suspend signals
