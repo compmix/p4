@@ -638,7 +638,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
     RootDirectorySectors = (BPB->rootEntityCount * 32)/512;
     FirstDataSector = FirstRootSector + RootDirectorySectors;
     ClusterCount = (BPB->totalSectors32 - FirstDataSector)/BPB->sectorsPerCluster;
-    dumpBPB();
+    //dumpBPB();
 
 
     // for all FAT sectors
@@ -1428,47 +1428,37 @@ TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
                 printf("%d,  %X\n", curClusBytes, FirstDataSector);
                 uint32_t read = openFile->fdOffset; //to keep track of how much we have read
 
-        do {
+
                 cout << hex << "curClus: " << curCluster << dec << endl;
                 cout << hex << "nextClus: " << FATTable[curCluster] << dec << endl;
 
 
-
                 char *localData = new char[*length]; //local var to copy data to/from
-                void *sharedBase; //temp address to allocate memory
+                
 
-                if(*length > 512)
+                if(*length > 1024)
                 {
-                    
-                    for(uint32_t i = 0; i < *length/512; ++i)
+                    for(uint32_t i = 0; i < *length/1024; ++i)
                     {
-                        dumpSector(readSector(FirstDataSector + curCluster * 2), 32);
+                        memcpy(&localData[i * 1024], readCluster(curCluster++), 1024);
 
-                        memcpy(&localData[i * 512], sharedBase, 512);
-                        read += 512;
-                    } //while we still have 512 bytes we will then read
-
+                        read += 1024;
+                    } //while we still have 1024 bytes we will then read
                 }
 
                 //else length < 512 or we do the remaining bytes
                 uint32_t remaining = *length - read;
-                VMMemoryPoolAllocate(0, remaining, &sharedBase);
-                MachineFileRead(FATfd, sharedBase, remaining, FileCallBack, currentThread);
-                currentThread->threadState = VM_THREAD_STATE_WAITING;
-                Scheduler();
 
-                memcpy(&localData[read], sharedBase, remaining);
-                read += currentThread->fileResult;
+                memcpy(&localData[read], readCluster(curCluster), remaining);
+                read += remaining;
+                dumpCluster((uint8_t*)localData, 32);
                 memcpy(data, localData, read);
 
-                delete localData; //delete it once we are done using it
-                VMMemoryPoolDeallocate(0, sharedBase);
                 *length = openFile->fdOffset = read; //set length to what we have read
 
                 //fileReadFDOffset = fileReadFDOffset + filedescriptor;
                 //cout << "fd >= 3 offset: " << fileReadFDOffset << endl;
 
-            } while(FATTable[curCluster++] < 0xFFF8);
 
     }   // if fd > 3
 
