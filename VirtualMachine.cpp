@@ -125,7 +125,7 @@ public:
     SVMDateTime DAccess;
     SVMDateTime DModify;
     uint32_t fd;
-    uint32_t fdOffset;
+    int fdOffset;
 };
 
 class OpenDir {
@@ -445,7 +445,6 @@ uint8_t* readSector(uint32_t sector) {
 
 uint8_t* readCluster(uint32_t dataCluster) {
     uint32_t sector = FirstDataSector + (dataCluster - 2) * 2;
-    cout << sector << endl;
     uint8_t *clusterData = new uint8_t[1024];
 
     memcpy(clusterData, readSector(sector), 512);
@@ -1321,6 +1320,9 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
             return VM_STATUS_FAILURE;
     }
 
+    if(newFile->DAttributes == ATTR_DIRECTORY)
+        return VM_STATUS_FAILURE;
+
     newFile->fd = *filedescriptor = openFileList.size() + 3;
     openFileList.push_back(newFile);
 
@@ -1421,41 +1423,45 @@ TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
 
                 //openFile = ROOT[1];     // for testing
                 //*length = 1024;
-                //cout << "first clust low: " << curCluster << endl; //should be 2
                 //MachineFileSeek(filedescriptor, offset, whence, FileCallBack, currentThread);
-                uint32_t curCluster = openFile->DIR_FstClusLO;
-                uint32_t curClusBytes = curCluster * 1024 + FirstDataSector * 512;
-                printf("%d,  %X\n", curClusBytes, FirstDataSector);
-                uint32_t read = openFile->fdOffset; //to keep track of how much we have read
+                int read = openFile->fdOffset; //offset will be -1 if EOF
+                uint32_t curCluster = openFile->DIR_FstClusLO + read;
 
+                //cout << hex << "curClus: " << curCluster << dec << endl;
+                //cout << hex << "nextClus: " << FATTable[curCluster] << dec << endl;
 
-                cout << hex << "curClus: " << curCluster << dec << endl;
-                cout << hex << "nextClus: " << FATTable[curCluster] << dec << endl;
-
+                if(read == -1)
+                    return  VM_STATUS_FAILURE;
 
                 char *localData = new char[*length]; //local var to copy data to/from
-                
 
                 if(*length > 1024)
                 {
                     for(uint32_t i = 0; i < *length/1024; ++i)
                     {
                         memcpy(&localData[i * 1024], readCluster(curCluster++), 1024);
-
                         read += 1024;
                     } //while we still have 1024 bytes we will then read
                 }
 
-                //else length < 512 or we do the remaining bytes
+                //else length < 1024 or we do the remaining bytes
                 uint32_t remaining = *length - read;
 
                 memcpy(&localData[read], readCluster(curCluster), remaining);
                 read += remaining;
-                dumpCluster((uint8_t*)localData, 32);
+                //dumpCluster((uint8_t*)localData, 32);
                 memcpy(data, localData, read);
 
-                *length = openFile->fdOffset = read; //set length to what we have read
+                *length = read; //set length to what we have read
+                
+                if(FATTable[curCluster] >= 0xFFF8)
+                    openFile->fdOffset = -1;        //EOF
+                else
+                    openFile->fdOffset += read / 1024;
 
+
+                //cerr << "read: " << read << endl;
+                //cerr << "read/1024: " << read / 1024 << endl;
                 //fileReadFDOffset = fileReadFDOffset + filedescriptor;
                 //cout << "fd >= 3 offset: " << fileReadFDOffset << endl;
 
