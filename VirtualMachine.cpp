@@ -23,6 +23,7 @@
 #include "VirtualMachine.h"
 #include "Machine.h"
 #include <vector>
+#include <map>
 #include <queue>
 #include <fcntl.h>
 #include <iostream>
@@ -193,6 +194,7 @@ vector<MB*> mutexSleepList; //sleeping mutexs
 vector<DirEntry*> ROOT;
 vector<OpenDir*> openDirList;
 vector<DirEntry*> openFileList;
+map<uint32_t, uint8_t*> loadedClus;
 
 int FATfd;
 BPB *BPB = new class BPB; //global fat var
@@ -1302,18 +1304,6 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
         }
     }
 
-    /*
-    uint8_t DLongFileName[VM_FILE_SYSTEM_MAX_PATH];
-    uint8_t DShortFileName[VM_FILE_SYSTEM_SFN_SIZE];
-    uint8_t DAttributes;
-    uint16_t DIR_FstClusLO;
-    uint32_t DSize;
-    SVMDateTime DCreate;
-    SVMDateTime DAccess;
-    SVMDateTime DModify;
-    uint32_t fd;
-    int fdOffset;
-    */
 
     if(newFile == NULL) { 
         cerr << "not found" << endl;
@@ -1350,6 +1340,8 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
     if(newFile->DAttributes == ATTR_DIRECTORY)
         return VM_STATUS_FAILURE;
 
+
+    VMDateTime(&newFile->DAccess);  // set access time
     newFile->fd = *filedescriptor = openFileList.size() + 3;
     openFileList.push_back(newFile);
 
@@ -1439,6 +1431,7 @@ TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
     } // if fd < 3
     else {  // IF FD > 3 DO NEW STUFF WITH CLUSTERS
 
+        // find existing opened file
             DirEntry *openFile = NULL;
             for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr) {
                 if((*itr)->fd == filedescriptor) {
@@ -1447,29 +1440,32 @@ TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
                 }
             }
 
+            if(openFile == NULL)        // fail if file doesnt exist
+                return VM_STATUS_FAILURE;
+
             int read = openFile->fdOffset; //offset will be -1 if EOF
-            uint32_t curCluster = openFile->DIR_FstClusLO + read;
-
-            if(read == -1)
+            if(read == -1) {
+                openFile->fdOffset = 0;
                 return  VM_STATUS_FAILURE;
-
-            char *localData = new char[*length]; //local var to copy data to/from
-
-            if(*length > 1024)
-            {
-                for(uint32_t i = 0; i < *length/1024; ++i)
-                {
-                    memcpy(&localData[i * 1024], readCluster(curCluster++), 1024);
-                    read += 1024;
-                } //while we still have 1024 bytes we will then read
             }
 
-            //else length < 1024 or we do the remaining bytes
+            uint32_t curCluster = openFile->DIR_FstClusLO + read;
+            char *localData = new char[*length]; //local var to copy data to/from
+
+            if(*length > 1024) {    // if larger than a cluster
+                for(uint32_t i = 0; i < *length/1024; ++i) {
+                    if(!loadedClus.count(curCluster))    // if not previously loaded, load in
+                        loadedClus[curCluster] = readCluster(curCluster);
+                    memcpy(&localData[i * 1024], loadedClus[curCluster++], 1024);
+                    read += 1024;
+                }
+            }
             uint32_t remaining = *length - read;
 
-            memcpy(&localData[read], readCluster(curCluster), remaining);
+            if(!loadedClus.count(curCluster))    // if not previously loaded, load in
+                loadedClus[curCluster] = readCluster(curCluster);
+            memcpy(&localData[read], loadedClus[curCluster], remaining);
             read += remaining;
-            //dumpCluster((uint8_t*)localData, 32);
             memcpy(data, localData, read);
 
             *length = read; //set length to what we have read
@@ -1494,20 +1490,39 @@ TVMStatus VMFileWrite(int filedescriptor, void *data, int *length)
     if(data == NULL || length == NULL) //invalid input
         return VM_STATUS_ERROR_INVALID_PARAMETER;
 
-    uint32_t written = 0; //to keep track of how much we have written
-    char *localData = new char[*length]; //local var to copy data to/from
-    memcpy(localData, data, *length); //we cope first
-    void *sharedBase; //temp address to allocate memory
+    if(filedescriptor < 3) {
+            uint32_t written = 0; //to keep track of how much we have written
+            char *localData = new char[*length]; //local var to copy data to/from
+            memcpy(localData, data, *length); //we cope first
+            void *sharedBase; //temp address to allocate memory
 
-    if(*length > 512)
-    {
-        VMMemoryPoolAllocate(0, 512, &sharedBase); //begin to allocate
-        for(uint32_t i = 0; i < (uint32_t)*length/512; ++i)
-        {
-            memcpy(sharedBase, &localData[i * 512], 512);
-            
-            MachineFileWrite(filedescriptor, sharedBase, 512, FileCallBack, currentThread);
+            if(*length > 512)
+            {
+                VMMemoryPoolAllocate(0, 512, &sharedBase); //begin to allocate
+                for(uint32_t i = 0; i < (uint32_t)*length/512; ++i)
+                {
+                    memcpy(sharedBase, &localData[i * 512], 512);
+                    
+                    MachineFileWrite(filedescriptor, sharedBase, 512, FileCallBack, currentThread);
 
+                    currentThread->threadState = VM_THREAD_STATE_WAITING;
+                    Scheduler();
+
+                    if(currentThread->fileResult < 0)
+                        return VM_STATUS_FAILURE;
+
+                    written += currentThread->fileResult;
+                } //while we still have 512 bytes we will then write
+                VMMemoryPoolDeallocate(0, sharedBase); //deallocate this once we are done
+            }
+
+            //else length < 512 or we do the remaining bytes
+            uint32_t remaining = *length - written; //for remainders of *length % 512
+            VMMemoryPoolAllocate(0, remaining, &sharedBase);
+
+            memcpy(sharedBase, &localData[written], remaining);
+
+            MachineFileWrite(filedescriptor, sharedBase, remaining, FileCallBack, currentThread);
             currentThread->threadState = VM_THREAD_STATE_WAITING;
             Scheduler();
 
@@ -1515,28 +1530,57 @@ TVMStatus VMFileWrite(int filedescriptor, void *data, int *length)
                 return VM_STATUS_FAILURE;
 
             written += currentThread->fileResult;
-        } //while we still have 512 bytes we will then write
-        VMMemoryPoolDeallocate(0, sharedBase); //deallocate this once we are done
+
+            delete localData; //delete this once we have written
+            VMMemoryPoolDeallocate(0, sharedBase);
+            *length = written; //set length to what we have written
+    } //if fd < 3
+    else {
+            DirEntry *openFile = NULL;
+            for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr) {
+                if((*itr)->fd == filedescriptor) {
+                    openFile = (*itr);
+                    break;
+                }
+            }
+
+            if(openFile == NULL)        // fail if file doesnt exist
+                return VM_STATUS_FAILURE;
+
+            int written = openFile->fdOffset; //offset will be -1 if EOF
+            if(written == -1) {
+                openFile->fdOffset = 0;
+                return  VM_STATUS_FAILURE;
+            }
+
+            uint32_t curCluster = openFile->DIR_FstClusLO + written;
+            char *localData = new char[*length]; //local var to copy data to/from
+            memcpy(localData, data, *length); //we copy first
+
+            cout << "cluster: " << curCluster << endl;
+
+            uint8_t *localClus = readCluster(curCluster);
+            dumpCluster(localClus, 32);
+
+            if(*length > 1024) {      // for every cluster
+                for(uint32_t i = 0; i < *length/1024; ++i) {
+                    if(!loadedClus.count(curCluster))    // if not previously loaded, load in
+                        loadedClus[curCluster] = readCluster(curCluster);
+                    memcpy(&localClus[i * 1024], &localData[i * 1024], 1024);
+                    written += 1024;
+                }
+            }
+            uint32_t remaining = *length - written;
+
+            memcpy(&localClus[written], &localData[written], remaining);
+            written += remaining;
+
+            dumpCluster(localClus, 32);
+
+            *length = written; //set length to what we have written
+
+            openFile->fdOffset += written / 1024;
     }
-
-    //else length < 512 or we do the remaining bytes
-    uint32_t remaining = *length - written; //for remainders of *length % 512
-    VMMemoryPoolAllocate(0, remaining, &sharedBase);
-
-    memcpy(sharedBase, &localData[written], remaining);
-
-    MachineFileWrite(filedescriptor, sharedBase, remaining, FileCallBack, currentThread);
-    currentThread->threadState = VM_THREAD_STATE_WAITING;
-    Scheduler();
-
-    if(currentThread->fileResult < 0)
-        return VM_STATUS_FAILURE;
-
-    written += currentThread->fileResult;
-
-    delete localData; //delete this once we have written
-    VMMemoryPoolDeallocate(0, sharedBase);
-    *length = written; //set length to what we have written
 
     MachineResumeSignals(&OldState); //resume signals
     return VM_STATUS_SUCCESS;
