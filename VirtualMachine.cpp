@@ -549,12 +549,12 @@ int parseDirEnt(uint32_t sector, vector<DirEntry*> *outDirEnt) {
         VMStringCopyN((char*)newEntry->DShortFileName, (char*)&rootSector[secOffset], 11);  // store filename (short)
         newEntry->DSize = rootSector[secOffset + 31] << 24 | rootSector[secOffset + 30] << 16 | rootSector[secOffset + 29] << 8 | rootSector[secOffset + 28];
         newEntry->DAttributes = rootSector[secOffset + 11];        // store attribute
+        newEntry->DCreate.DHundredth = rootSector[secOffset + 13];
         newEntry->DCreate = *parseDT(rootSector[secOffset + 17] << 8 | rootSector[secOffset + 16], rootSector[secOffset + 15] << 8 | rootSector[secOffset + 14]);
         newEntry->DAccess = *parseDT(rootSector[secOffset + 19] << 8 | rootSector[secOffset + 18], 0);
         newEntry->DModify = *parseDT(rootSector[secOffset + 25] << 8 | rootSector[secOffset + 24], rootSector[secOffset + 23] << 8 | rootSector[secOffset + 22]);
 
         newEntry->DIR_FstClusLO = rootSector[secOffset + 27] << 8 | rootSector[secOffset + 26];      // store fstClusLO
-
 
         outDirEnt->push_back(newEntry);    // save
 
@@ -651,13 +651,12 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
     //dumpFAT();
 
 
-        // for all root sectors
+    // for all root sectors
     for(uint32_t i = 0; i < RootDirectorySectors; ++i) {
         uint32_t sector = i + FirstRootSector;       // starts at
 
         if(parseDirEnt(sector, &ROOT) == -1)
             break;
-
     }   
     //dumpROOT();
 
@@ -1303,9 +1302,22 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
         }
     }
 
-    if(newFile == NULL) {
+    /*
+    uint8_t DLongFileName[VM_FILE_SYSTEM_MAX_PATH];
+    uint8_t DShortFileName[VM_FILE_SYSTEM_SFN_SIZE];
+    uint8_t DAttributes;
+    uint16_t DIR_FstClusLO;
+    uint32_t DSize;
+    SVMDateTime DCreate;
+    SVMDateTime DAccess;
+    SVMDateTime DModify;
+    uint32_t fd;
+    int fdOffset;
+    */
+
+    if(newFile == NULL) { 
         cerr << "not found" << endl;
-        if((flags & O_CREAT) == O_CREAT) {
+        if((flags & O_CREAT) == O_CREAT) {          // create if necessary
             cerr << "creating" << endl;
             MachineFileOpen(filename, flags, mode, FileCallBack, currentThread);
             currentThread->threadState = VM_THREAD_STATE_WAITING; //set to wait
@@ -1315,6 +1327,21 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
                 return VM_STATUS_FAILURE;
             
             newFile = new DirEntry;
+
+            VMStringCopy((char*)newFile->DShortFileName, fileN);
+            VMDateTime(&newFile->DCreate);
+
+            // search for an open cluster
+            int i = 0;
+            for(vector<uint16_t>::iterator itr = FATTable.begin(); itr != FATTable.end(); ++itr, ++i){
+                if((*itr) == 0) {
+                    *itr = 0xFFFF;
+                    newFile->DIR_FstClusLO = i;
+                    break;
+                }
+            } 
+
+            ROOT.push_back(newFile);
 
         } else if(flags != O_CREAT)        // check O_CREAT, create
             return VM_STATUS_FAILURE;
@@ -1370,103 +1397,89 @@ TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
 
         
     if(filedescriptor < 3) {        // IF FD < 3 DO OLD STUFF
-                uint32_t read = 0; //to keep track of how much we have read
-                char *localData = new char[*length]; //local var to copy data to/from
-                void *sharedBase; //temp address to allocate memory
+            uint32_t read = 0; //to keep track of how much we have read
+            char *localData = new char[*length]; //local var to copy data to/from
+            void *sharedBase; //temp address to allocate memory
 
-                if(*length > 512)
+            if(*length > 512)
+            {
+                VMMemoryPoolAllocate(0, 512, &sharedBase); //begin to allocate with 512 bytes
+                for(uint32_t i = 0; i < (uint32_t)*length/512; ++i)
                 {
-                    VMMemoryPoolAllocate(0, 512, &sharedBase); //begin to allocate with 512 bytes
-                    for(uint32_t i = 0; i < (uint32_t)*length/512; ++i)
-                    {
-                        MachineFileRead(filedescriptor, sharedBase, 512, FileCallBack, currentThread);
+                    MachineFileRead(filedescriptor, sharedBase, 512, FileCallBack, currentThread);
 
-                        currentThread->threadState = VM_THREAD_STATE_WAITING;
-                        Scheduler();
+                    currentThread->threadState = VM_THREAD_STATE_WAITING;
+                    Scheduler();
 
-                        memcpy(&localData[i * 512], sharedBase, 512);
-                        read += currentThread->fileResult;   
-                    } //while we still have 512 bytes we will then read
-                    VMMemoryPoolDeallocate(0, sharedBase); //deallcate once we are done
-                }
+                    memcpy(&localData[i * 512], sharedBase, 512);
+                    read += currentThread->fileResult;   
+                } //while we still have 512 bytes we will then read
+                VMMemoryPoolDeallocate(0, sharedBase); //deallcate once we are done
+            }
 
-                //else length < 512 or we do the remaining bytes
-                uint32_t remaining = *length - read; //for remainders of *length % 512
-                VMMemoryPoolAllocate(0, remaining, &sharedBase);
-               
-                MachineFileRead(filedescriptor, sharedBase, remaining, FileCallBack, currentThread);
-                currentThread->threadState = VM_THREAD_STATE_WAITING;
-                Scheduler();
+            //else length < 512 or we do the remaining bytes
+            uint32_t remaining = *length - read; //for remainders of *length % 512
+            VMMemoryPoolAllocate(0, remaining, &sharedBase);
+           
+            MachineFileRead(filedescriptor, sharedBase, remaining, FileCallBack, currentThread);
+            currentThread->threadState = VM_THREAD_STATE_WAITING;
+            Scheduler();
 
-                memcpy(&localData[read], sharedBase, remaining);
-                read += currentThread->fileResult;
-                
-                memcpy(data, localData, read);
+            memcpy(&localData[read], sharedBase, remaining);
+            read += currentThread->fileResult;
+            
+            memcpy(data, localData, read);
 
-                delete localData; //delete it once we are done using it
-                VMMemoryPoolDeallocate(0, sharedBase);
-                *length = read; //set length to what we have read
+            delete localData; //delete it once we are done using it
+            VMMemoryPoolDeallocate(0, sharedBase);
+            *length = read; //set length to what we have read
 
-                if(currentThread->fileResult < 0) //check for failure
-                    return VM_STATUS_FAILURE;
+            if(currentThread->fileResult < 0) //check for failure
+                return VM_STATUS_FAILURE;
     } // if fd < 3
     else {  // IF FD > 3 DO NEW STUFF WITH CLUSTERS
 
-            // find new 
-                DirEntry *openFile = NULL;
-                for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr) {
-                    if((*itr)->fd == filedescriptor) {
-                        openFile = (*itr);
-                        break;
-                    }
+            DirEntry *openFile = NULL;
+            for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr) {
+                if((*itr)->fd == filedescriptor) {
+                    openFile = (*itr);
+                    break;
                 }
+            }
 
-                //openFile = ROOT[1];     // for testing
-                //*length = 1024;
-                //MachineFileSeek(filedescriptor, offset, whence, FileCallBack, currentThread);
-                int read = openFile->fdOffset; //offset will be -1 if EOF
-                uint32_t curCluster = openFile->DIR_FstClusLO + read;
+            int read = openFile->fdOffset; //offset will be -1 if EOF
+            uint32_t curCluster = openFile->DIR_FstClusLO + read;
 
-                //cout << hex << "curClus: " << curCluster << dec << endl;
-                //cout << hex << "nextClus: " << FATTable[curCluster] << dec << endl;
+            if(read == -1)
+                return  VM_STATUS_FAILURE;
 
-                if(read == -1)
-                    return  VM_STATUS_FAILURE;
+            char *localData = new char[*length]; //local var to copy data to/from
 
-                char *localData = new char[*length]; //local var to copy data to/from
-
-                if(*length > 1024)
+            if(*length > 1024)
+            {
+                for(uint32_t i = 0; i < *length/1024; ++i)
                 {
-                    for(uint32_t i = 0; i < *length/1024; ++i)
-                    {
-                        memcpy(&localData[i * 1024], readCluster(curCluster++), 1024);
-                        read += 1024;
-                    } //while we still have 1024 bytes we will then read
-                }
+                    memcpy(&localData[i * 1024], readCluster(curCluster++), 1024);
+                    read += 1024;
+                } //while we still have 1024 bytes we will then read
+            }
 
-                //else length < 1024 or we do the remaining bytes
-                uint32_t remaining = *length - read;
+            //else length < 1024 or we do the remaining bytes
+            uint32_t remaining = *length - read;
 
-                memcpy(&localData[read], readCluster(curCluster), remaining);
-                read += remaining;
-                //dumpCluster((uint8_t*)localData, 32);
-                memcpy(data, localData, read);
+            memcpy(&localData[read], readCluster(curCluster), remaining);
+            read += remaining;
+            //dumpCluster((uint8_t*)localData, 32);
+            memcpy(data, localData, read);
 
-                *length = read; //set length to what we have read
-                
-                if(FATTable[curCluster] >= 0xFFF8)
-                    openFile->fdOffset = -1;        //EOF
-                else
-                    openFile->fdOffset += read / 1024;
+            *length = read; //set length to what we have read
+            
+            if(FATTable[curCluster] >= 0xFFF8)
+                openFile->fdOffset = -1;        //EOF
+            else
+                openFile->fdOffset += read / 1024;
 
-
-                //cerr << "read: " << read << endl;
-                //cerr << "read/1024: " << read / 1024 << endl;
-                //fileReadFDOffset = fileReadFDOffset + filedescriptor;
-                //cout << "fd >= 3 offset: " << fileReadFDOffset << endl;
-
-
-    }   // if fd > 3
+    }   //if fd > 3
 
 
     MachineResumeSignals(&OldState); //resume signals
