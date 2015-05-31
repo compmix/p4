@@ -150,6 +150,7 @@ public:
         
     //VirtualMachineUtils.c Functions
 extern TVMStatus VMDateTime(SVMDateTimeRef curdatetime);
+extern uint32_t VMStringLength(const char *str);
 extern void VMStringCopy(char *dest, const char *src);
 extern void VMStringCopyN(char *dest, const char *src, int32_t n);
 extern void VMStringConcatenate(char *dest, const char *src);
@@ -441,14 +442,19 @@ uint8_t* readSector(uint32_t sector) {
     return sectorData;
 }
 
-
-uint16_t* u8tou16(uint8_t *sector, uint32_t size)
-{
+uint16_t* u8tou16(uint8_t *sector, uint32_t size){
     uint16_t *newArr = new uint16_t[size/2];
     for(uint32_t i = 0; i < size/2; i += 2)
         newArr[i/2] = sector[i+1] << 8 | sector[i];
 
     return newArr;
+}
+
+void toUpper(char *str) {
+    do {
+        if(*str >= 97 && *str <= 122)
+            *str = *str - 32;
+    } while(*str++);
 }
 
 SVMDateTime* parseDT(uint16_t rawDate, uint16_t rawTime) {
@@ -1235,13 +1241,14 @@ TVMStatus VMMutexRelease(TVMMutexID mutex)
         check if mode == o_create
         
     open allcaps
+
+    ->
     get firstdatacluster/size
     filepointer is offset within the file
     vector hold open file information
     currsize (might be update later)
 
     add to openfilevector, filedescriptor
-
 
 */
 TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescriptor)
@@ -1252,6 +1259,38 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
     if(filename == NULL || filedescriptor == NULL)
         return VM_STATUS_ERROR_INVALID_PARAMETER;
 
+    char absPath[64], currPath[64], fileN[64];
+    VMDirectoryCurrent(currPath);                                   // should be root '/'
+    VMFileSystemGetAbsolutePath(absPath, currPath, filename);       // if filename is like /blah/yada
+    
+    if(strrchr(absPath, '/') - absPath != 0)      // checks if more than one /
+        return VM_STATUS_FAILURE;
+
+    VMFileSystemFileFromFullPath(fileN, absPath);
+    toUpper(fileN); // make case insensitive
+
+    if(VMStringLength(fileN) > 11)              // fail if long name
+        return VM_STATUS_FAILURE;
+
+    char padding[13];
+    VMStringCopyN(padding, "              ", 11 - VMStringLength(fileN));
+    VMStringConcatenate(fileN, padding);
+    cerr << "looking for file " << fileN << " in " << "/" << endl;
+    
+    for(vector<DirEntry*>::iterator itr = ROOT.begin(); itr != ROOT.end(); ++itr){
+        if(strcmp((char*)(*itr)->DShortFileName, fileN) == 0) {
+            cerr << fileN << " found!" << endl;
+            break;
+        }
+    }
+
+
+
+
+
+
+    return VM_STATUS_FAILURE;
+   
     MachineFileOpen(filename, flags, mode, FileCallBack, currentThread);
     currentThread->threadState = VM_THREAD_STATE_WAITING; //set to wait
     Scheduler(); //now we schedule threads so that we can let other threads work
