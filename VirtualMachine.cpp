@@ -271,7 +271,7 @@ void idleFunction(void* TCBref)
     while(1)
     {
         MachineSuspendSignals(&OldState);
-        usleep(10000);
+        //usleep(10000);
         MachineResumeSignals(&OldState);
     } //this is idling while we are in the idle state
 } //idleFunction()
@@ -483,7 +483,6 @@ void writeCluster(uint32_t dataCluster, uint8_t *clusterData) {
 
     writeSector(sector, clusterData);
     writeSector(sector, &clusterData[512]);
-
 }
 
 uint16_t* u8tou16(uint8_t *sector, uint32_t size){
@@ -596,6 +595,33 @@ int parseDirEnt(uint32_t sector, vector<DirEntry*> *outDirEnt) {
     return 1;
 }
 
+void dismountFAT(){
+
+    cerr << "writing clusters" << endl;
+    // for every modified cluster, write out
+    int i = 0;
+    for(map<uint32_t, uint8_t*>::iterator itr = loadedClus.begin(); itr != loadedClus.end(); ++itr)
+    {   
+        writeCluster(itr->first, itr->second);
+    }
+
+    cerr << "writing FAT" << endl;
+    //update FAT table
+    i = 0;
+    for(vector<uint16_t>::iterator itr = FATTable.begin(); itr != FATTable.end(); ++itr, ++i) {
+        uint32_t sector = i + 1;
+        uint8_t *fatSector = new uint8_t[512];
+        for(uint16_t j = 0; j < 512; ) {        // recombine a whole sector
+            fatSector[j++] = (*itr) & 0xFF;
+            fatSector[j++] = (*itr) >> 8;
+        }
+        cout << i << endl;
+        writeSector(sector, fatSector);
+    }
+
+    cerr << "closing fd" << endl;
+}
+
 //***************************************************************************//
 //The Virtual Machine Starter!
 //***************************************************************************//
@@ -696,10 +722,9 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
 
     VMMain(argc, argv); //call to vmmain
 
+
     //DISMOUNT FILE******
-    //MachineFileClose(filedescriptor, FileCallBack, currentThread);
-    //currentThread->threadState = VM_THREAD_STATE_WAITING;
-    //Scheduler(); //now we schedule our threads
+    dismountFAT();
 
     return VM_STATUS_SUCCESS;
 } //VMStart()
@@ -1377,31 +1402,6 @@ TVMStatus VMFileClose(int filedescriptor)
     }
 
     VMDateTime(&myFile->DModify); //update date/time modified
-
-
-    // for every modified cluster, write out// for every modified cluster, write out
-    int i = 0;
-    for(map<uint32_t, uint8_t*>::iterator itr = loadedClus.begin(); itr != loadedClus.end(); ++itr)
-    {   
-        uint32_t cluster = itr->first;
-        writeCluster(cluster, itr->second);
-    }
-
-    //update FAT table
-    i = 0;
-    for(vector<uint16_t>::iterator itr = FATTable.begin(); itr != FATTable.end(); ++itr, ++i) {
-        uint32_t sector = i + 1;
-        uint8_t *fatSector = new uint8_t[512];
-        for(uint16_t j = 0; j < 512; ) {        // recombine a whole sector
-            fatSector[j++] = (*itr) & 0xFF;
-            fatSector[j++] = (*itr) >> 8;
-        }
-
-        writeSector(sector, fatSector);
-    }
-
-    
-
 
     MachineFileClose(filedescriptor, FileCallBack, currentThread);
     currentThread->threadState = VM_THREAD_STATE_WAITING;
