@@ -450,9 +450,40 @@ uint8_t* readCluster(uint32_t dataCluster) {
     uint8_t *clusterData = new uint8_t[1024];
 
     memcpy(clusterData, readSector(sector), 512);
-    memcpy(&clusterData[512], readSector(sector + 512), 512);
+    memcpy(&clusterData[512], readSector(sector + 1), 512);
 
     return clusterData;
+}
+
+int writeSector(uint32_t sector, uint8_t *sectorData) {
+
+    void *sharedMem;
+    VMMemoryPoolAllocate(0, 512, &sharedMem); //begin to allocate
+    MachineFileSeek(FATfd, sector * 512, 0, FileCallBack, currentThread);
+    currentThread->threadState = VM_THREAD_STATE_WAITING;
+    Scheduler();
+
+    memcpy(sharedMem, sectorData, 512); //mem copy from data to shared
+
+    MachineFileWrite(FATfd, sharedMem, 512, FileCallBack, currentThread);
+    currentThread->threadState = VM_THREAD_STATE_WAITING;
+    Scheduler(); //now we schedule our threads
+
+    /*
+                                for(int j = 0; j < 32; ++j) printf("%2d ", j); printf("\n");
+                                for(int j = 0; j < 512; ++j) printf("%02X ", ((uint8_t *)sharedMem)[j]);
+    */
+
+    VMMemoryPoolDeallocate(0, &sharedMem);
+    return currentThread->fileResult;
+}
+
+void writeCluster(uint32_t dataCluster, uint8_t *clusterData) {
+    uint32_t sector = FirstDataSector + (dataCluster - 2) * 2;
+
+    writeSector(sector, clusterData);
+    writeSector(sector, &clusterData[512]);
+
 }
 
 uint16_t* u8tou16(uint8_t *sector, uint32_t size){
@@ -1348,12 +1379,28 @@ TVMStatus VMFileClose(int filedescriptor)
     VMDateTime(&myFile->DModify); //update date/time modified
 
 
-    // for every modified cluster, write out
-    for(map<uint32_t, uint8_t*>::iterator itr = loadedClus.begin(); itr != loadedClus.end(); ++itr) {
-
-
-
+    // for every modified cluster, write out// for every modified cluster, write out
+    int i = 0;
+    for(map<uint32_t, uint8_t*>::iterator itr = loadedClus.begin(); itr != loadedClus.end(); ++itr)
+    {   
+        uint32_t cluster = itr->first;
+        writeCluster(cluster, itr->second);
     }
+
+    //update FAT table
+    i = 0;
+    for(vector<uint16_t>::iterator itr = FATTable.begin(); itr != FATTable.end(); ++itr, ++i) {
+        uint32_t sector = i + 1;
+        uint8_t *fatSector = new uint8_t[512];
+        for(uint16_t j = 0; j < 512; ) {        // recombine a whole sector
+            fatSector[j++] = (*itr) & 0xFF;
+            fatSector[j++] = (*itr) >> 8;
+        }
+
+        writeSector(sector, fatSector);
+    }
+
+    
 
 
     MachineFileClose(filedescriptor, FileCallBack, currentThread);
@@ -1439,6 +1486,8 @@ TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
             char *localData = new char[*length]; //local var to copy data to/from
             uint8_t *localClus = new uint8_t[*length];
 
+            //fprintf(stderr, "\n\nLength: %d\n", *length);
+
             if(*length > 1024) {    // if larger than a cluster
                 for(uint32_t i = 0; i < (uint32_t)*length/1024; ++i) {
 
@@ -1459,17 +1508,23 @@ TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
             else
                 localClus = readCluster(curCluster);
             memcpy(&localData[read], localClus, remaining);
-            curCluster++;
+
             read += remaining;
             memcpy(data, localData, read);
 
             *length = read; //set length to what we have read
+
+            //fprintf(stderr, "CurCluster: %X\n", curCluster);
+            //fprintf(stderr, "nexClus: %X\n", FATTable[curCluster]);
+
+            //dumpCluster(localClus, 32);
             
-            if(FATTable[curCluster] >= 0xFFF8)
+            if(FATTable[curCluster++] >= 0xFFF8)
                 openFile->fdOffset = -1;        //EOF
             else
                 openFile->fdOffset += read / 1024;
 
+            //fprintf(stderr, "openFile->fdOffset: %d\n\n", openFile->fdOffset);
     }   //if fd > 3
 
 
