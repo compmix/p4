@@ -271,7 +271,7 @@ void idleFunction(void* TCBref)
     while(1)
     {
         MachineSuspendSignals(&OldState);
-        usleep(10000);
+        //usleep(10000);
         MachineResumeSignals(&OldState);
     } //this is idling while we are in the idle state
 } //idleFunction()
@@ -482,7 +482,7 @@ void writeCluster(uint32_t dataCluster, uint8_t *clusterData) {
     uint32_t sector = FirstDataSector + (dataCluster - 2) * 2;
 
     writeSector(sector, clusterData);
-    writeSector(sector, &clusterData[512]);
+    writeSector(sector + 1, &clusterData[512]);
 }
 
 uint16_t* u8tou16(uint8_t *sector, uint32_t size){
@@ -675,23 +675,24 @@ int writeDirEnt(uint32_t sector, vector<DirEntry*> *inDirEnt, vector<DirEntry*>:
 }
 
 void allocateFAT(uint32_t start, uint32_t amount) {
-    int i = start;
-    while(FATTable[i] < 0xFFF8){
-        i = FATTable[i];
-    }
+    while(amount--) {
+        int i = start;
+        while(FATTable[i] < 0xFFF8){
+            i = FATTable[i];
+        }
 
-    //cout << hex << start << endl;
+        //cout << hex << start << endl;
 
-    // this is the end of the cluster chain
-    // search for an empty spot
-    for(vector<uint16_t>::iterator itr = FATTable.begin(); itr != FATTable.end(); ++itr) {
-        if((*itr) == 0) {     // if empty
-            FATTable[i] = distance(FATTable.begin(), itr);
-            *itr = 0xFFFF;
-            break;
+        // this is the end of the cluster chain
+        // search for an empty spot
+        for(vector<uint16_t>::iterator itr = FATTable.begin(); itr != FATTable.end(); ++itr) {
+            if((*itr) == 0) {     // if empty
+                FATTable[i] = distance(FATTable.begin(), itr);
+                *itr = 0xFFFF;
+                break;
+            }
         }
     }
-
 }
 
 void dismountFAT(){
@@ -700,6 +701,8 @@ void dismountFAT(){
     // for every modified cluster, write out
     for(map<uint32_t, uint8_t*>::iterator itr = loadedClus.begin(); itr != loadedClus.end(); ++itr)
     {   
+        //cerr << itr->first << endl;
+        //dumpCluster(itr->second, 32);
         writeCluster(itr->first, itr->second);
     }
 
@@ -946,7 +949,7 @@ TVMStatus VMDirectoryRewind(int dirdescriptor)
     DirEntry *curDir = NULL;
     for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr)
     {
-        if((*itr)->fd == dirdescriptor)
+        if((*itr)->fd == (uint32_t)dirdescriptor)
         {
             curDir = *itr;
             break;
@@ -1778,9 +1781,9 @@ TVMStatus VMFileWrite(int filedescriptor, void *data, int *length)
             loadedClus[curCluster] = &localClus[written];
             written += remaining;
 
-            *length = written; //set length to what we have written
+            openFile->DSize = *length = written; //set length to what we have written
             openFile->fdOffset += written / 1024;
-            openFile->DSize = written;
+            
             allocateFAT(openFile->DIR_FstClusLO, openFile->fdOffset);
     }
 
