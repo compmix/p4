@@ -554,13 +554,13 @@ char* parseName(char *FileName) {
 
     if(FileName[8] > 64) {        // has an extension
         shortName[i++] = '.';
-        for(int j = 0; j < 3; ++j)
-            shortName[i + j] = FileName[8 + j];
-        i++;
+        for(int j = 0; j < 3; ++j) {
+            shortName[i] = FileName[8 + j];
+            i++;
+        }
     }
 
     shortName[i] = '\0';
-
     return shortName;
 }
 
@@ -634,12 +634,14 @@ int readDirEnt(uint32_t sector, vector<DirEntry*> *outDirEnt) {
 
 int writeDirEnt(uint32_t sector, vector<DirEntry*> *inDirEnt, vector<DirEntry*>::iterator *itr) {
     // for each root entry
+    if(*itr == inDirEnt->end())
+        return -1;
 
     uint8_t *newSector = new uint8_t[512];
     
     for(uint32_t secOffset = 0; secOffset < 512; secOffset += 32) {
         if(*itr == inDirEnt->end())
-            return -1;
+            break;
 
         DirEntry* curEntry = **itr;
 
@@ -665,21 +667,43 @@ int writeDirEnt(uint32_t sector, vector<DirEntry*> *inDirEnt, vector<DirEntry*>:
         ++(*itr);
     }
 
+    //dumpSector(newSector, 32);
+
     writeSector(sector, newSector);
 
     return 1;
 }
 
+void allocateFAT(uint32_t start, uint32_t amount) {
+    int i = start;
+    while(FATTable[i] < 0xFFF8){
+        i = FATTable[i];
+    }
+
+    //cout << hex << start << endl;
+
+    // this is the end of the cluster chain
+    // search for an empty spot
+    for(vector<uint16_t>::iterator itr = FATTable.begin(); itr != FATTable.end(); ++itr) {
+        if((*itr) == 0) {     // if empty
+            FATTable[i] = distance(FATTable.begin(), itr);
+            *itr = 0xFFFF;
+            break;
+        }
+    }
+
+}
+
 void dismountFAT(){
 
-    cerr << "writing clusters" << endl;
+    //cerr << "writing clusters" << endl;
     // for every modified cluster, write out
     for(map<uint32_t, uint8_t*>::iterator itr = loadedClus.begin(); itr != loadedClus.end(); ++itr)
     {   
         writeCluster(itr->first, itr->second);
     }
 
-    cerr << "writing FAT" << endl;
+    //cerr << "writing FAT" << endl;
     //update FAT table
     int j = 0;
     uint32_t sector = 1;
@@ -695,15 +719,17 @@ void dismountFAT(){
         }
     }
 
+    //cerr << "writing root" << endl;
     //update ROOT dir
+    vector<DirEntry*>::iterator itr = ROOT.begin();
     for(uint32_t i = 0; i < RootDirectorySectors; ++i) {
         uint32_t sector = i + FirstRootSector;       // starts at
-        vector<DirEntry*>::iterator itr = ROOT.begin();
+
         if(writeDirEnt(sector, &ROOT, &itr) == -1)
             break;
     }
 
-    cerr << "closing fd" << endl;
+    //cerr << "closing fd" << endl;
 }
 
 //***************************************************************************//
@@ -914,7 +940,26 @@ TVMStatus VMDirectoryRead(int dirdescriptor, SVMDirectoryEntryRef dirent)
 
 TVMStatus VMDirectoryRewind(int dirdescriptor)
 {
-    return 0;
+    TMachineSignalState OldState; //local variable to suspend signals
+    MachineSuspendSignals(&OldState); //suspend signals
+
+    DirEntry *curDir = NULL;
+    for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr)
+    {
+        if((*itr)->fd == dirdescriptor)
+        {
+            curDir = *itr;
+            break;
+        }
+    } //loop to find dirdescriptor in open open files
+
+    if(curDir == NULL)
+        return VM_STATUS_FAILURE;
+
+    curDir->fdOffset = 0; //reset here, place dir ptr back to beginning of the dir
+
+    MachineResumeSignals(&OldState); //resume signals
+    return VM_STATUS_SUCCESS;
 } //VMDirectoryRewind()
 
 TVMStatus VMDirectoryCurrent(char *abspath)
@@ -1443,22 +1488,22 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
 
         shortName[12] = '\0';
     }
-    
+
 
     DirEntry *newFile = NULL;
     for(vector<DirEntry*>::iterator itr = ROOT.begin(); itr != ROOT.end(); ++itr){
         if(strcmp((char*)(*itr)->DShortFileName, shortName) == 0) {
             newFile = (*itr);
-            cerr << fileN << " found!" << endl;
+            //cerr << shortName << " found!" << endl;
             break;
         }
     }
 
 
     if(newFile == NULL) { 
-        cerr << "not found" << endl;
+        //cerr << "not found" << endl;
         if((flags & O_CREAT) == O_CREAT) {          // create if necessary
-            cerr << "creating" << endl;
+            //cerr << "creating" << endl;
             MachineFileOpen(filename, flags, mode, FileCallBack, currentThread);
             currentThread->threadState = VM_THREAD_STATE_WAITING; //set to wait
             Scheduler(); //now we schedule threads so that we can let other threads work
@@ -1468,7 +1513,7 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
             
             newFile = new DirEntry;
 
-            VMStringCopy((char*)newFile->DShortFileName, fileN);
+            VMStringCopy((char*)newFile->DShortFileName, shortName);
             VMDateTime(&newFile->DCreate);
 
             // search for an open cluster
@@ -1522,7 +1567,6 @@ TVMStatus VMFileClose(int filedescriptor)
     MachineResumeSignals(&OldState); //resume signals
     return VM_STATUS_SUCCESS;
 } //VMFileClose()
-
 
 TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
 {
@@ -1736,6 +1780,8 @@ TVMStatus VMFileWrite(int filedescriptor, void *data, int *length)
 
             *length = written; //set length to what we have written
             openFile->fdOffset += written / 1024;
+            openFile->DSize = written;
+            allocateFAT(openFile->DIR_FstClusLO, openFile->fdOffset);
     }
 
     MachineResumeSignals(&OldState); //resume signals
@@ -1747,12 +1793,54 @@ TVMStatus VMFileSeek(int filedescriptor, int offset, int whence, int *newoffset)
     TMachineSignalState OldState; //local variable to suspend signals
     MachineSuspendSignals(&OldState); //suspend signals
 
-    MachineFileSeek(filedescriptor, offset, whence, FileCallBack, currentThread);
+    //cout << "offset: " << offset << endl;
 
-    currentThread->threadState = VM_THREAD_STATE_WAITING;
-    Scheduler();
+    if(filedescriptor < 3)
+    {
+        MachineFileSeek(filedescriptor, offset, whence, FileCallBack, currentThread);
+        currentThread->threadState = VM_THREAD_STATE_WAITING;
+        Scheduler();
 
-    *newoffset = currentThread->fileResult; //set newoffset to file result
+        *newoffset = currentThread->fileResult; //set newoffset to file result
+    }
+
+    else //fd >= 3
+    {   
+        MachineFileSeek(filedescriptor, *newoffset, whence, FileCallBack, currentThread);
+        currentThread->threadState = VM_THREAD_STATE_WAITING;
+        Scheduler();
+
+        DirEntry *myFile = new DirEntry;
+        for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr)
+        {
+            if((*itr)->fd == (uint32_t)filedescriptor)
+            {
+                myFile = (*itr);
+                break;
+            }
+        }
+
+        if(whence == 0) //SEEK_SET
+        {
+            //cout << "whence is 0" << endl;
+            *newoffset = offset; //The offset is set to offset bytes.
+        }
+
+        else if(whence == 1) //SEEK_CUR
+        {   
+            //cout << "whence is 1" << endl;
+            *newoffset = myFile->fd + offset; //The offset is set to its current location plus offset bytes.
+        }
+
+        else if(whence == 2) //SEEK_END
+        {
+            //cout << "whence is 2" << endl;
+            *newoffset = myFile->DSize + offset; //The offset is set to the size of the file plus offset bytes.
+        }
+
+        else
+            *newoffset = currentThread->fileResult; //set newoffset to file result
+    }
 
     MachineResumeSignals(&OldState); //resume signals
     if(currentThread->fileResult < 0) //check for failure
