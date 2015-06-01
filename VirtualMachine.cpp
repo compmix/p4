@@ -1251,24 +1251,6 @@ TVMStatus VMMutexRelease(TVMMutexID mutex)
 //File Functions
 //***************************************************************************//
 
-//If you're not doing extra credit, you only need to search through your root directory. If the requested file can't be found in the root directory, you return VM_STATUS_FAILURE.
-/*
-    use getabspath(abs, cur, path);
-    check if exists using getfilename/getdirname
-    find if exists caseinsensitive
-        check if mode == o_create
-        
-    open allcaps
-
-    ->
-    get firstdatacluster/size
-    filepointer is offset within the file
-    vector hold open file information
-    currsize (might be update later)
-
-    add to openfilevector, filedescriptor
-
-*/
 TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescriptor)
 {
     TMachineSignalState OldState; //local variable to suspend signals
@@ -1327,6 +1309,7 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
                 if((*itr) == 0) {
                     *itr = 0xFFFF;
                     newFile->DIR_FstClusLO = i;
+                    //cout << "fstClusLO: " << i << endl;
                     break;
                 }
             } 
@@ -1354,8 +1337,26 @@ TVMStatus VMFileClose(int filedescriptor)
     TMachineSignalState OldState; //local variable to suspend signals
     MachineSuspendSignals(&OldState); //suspend signals
 
-    MachineFileClose(filedescriptor, FileCallBack, currentThread);
+    DirEntry *myFile = new DirEntry;
+    for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr) {
+        if((*itr)->fd == (uint32_t)filedescriptor) {
+            myFile = (*itr);
+            break;
+        }
+    }
 
+    VMDateTime(&myFile->DModify); //update date/time modified
+
+
+    // for every modified cluster, write out
+    for(map<uint32_t, uint8_t*>::iterator itr = loadedClus.begin(); itr != loadedClus.end(); ++itr) {
+
+
+
+    }
+
+
+    MachineFileClose(filedescriptor, FileCallBack, currentThread);
     currentThread->threadState = VM_THREAD_STATE_WAITING;
     Scheduler(); //now we schedule our threads
 
@@ -1364,21 +1365,6 @@ TVMStatus VMFileClose(int filedescriptor)
 } //VMFileClose()
 
 
-/*
-    clustype getClus() {
-        FirstDataSect(clusnum - 2) * secperclus;
-
-    }
-
-*/
-/*
-    clusterSkip = FP/clussize(bytes)    //
-    clusOff = FP % clussize             //offset within the cluster to start reading from
-    clusNum = findClus(firstclus, clusSkip)
-    clus = getClus(ClusNum)             // also check if it has been loaded already
-    clus should have dirtybit, vector of uint8_t
-    memcpy from clusbuff to databuff a min(*length, Clussize - clusoff) // how many bytes left in curr cluster to read from
-*/
 TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
 {
     TMachineSignalState OldState; //local variable to suspend signals
@@ -1434,7 +1420,7 @@ TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
         // find existing opened file
             DirEntry *openFile = NULL;
             for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr) {
-                if((*itr)->fd == filedescriptor) {
+                if((*itr)->fd == (uint32_t)filedescriptor) {
                     openFile = (*itr);
                     break;
                 }
@@ -1451,20 +1437,29 @@ TVMStatus VMFileRead(int filedescriptor, void *data, int *length)
 
             uint32_t curCluster = openFile->DIR_FstClusLO + read;
             char *localData = new char[*length]; //local var to copy data to/from
+            uint8_t *localClus = new uint8_t[*length];
 
             if(*length > 1024) {    // if larger than a cluster
-                for(uint32_t i = 0; i < *length/1024; ++i) {
-                    if(!loadedClus.count(curCluster))    // if not previously loaded, load in
-                        loadedClus[curCluster] = readCluster(curCluster);
-                    memcpy(&localData[i * 1024], loadedClus[curCluster++], 1024);
+                for(uint32_t i = 0; i < (uint32_t)*length/1024; ++i) {
+
+                    if(loadedClus.count(curCluster))    // if previously loaded, use that
+                        localClus = loadedClus[curCluster];
+                    else
+                        localClus = readCluster(curCluster);
+
+                    memcpy(&localData[i * 1024], localClus, 1024);
+                    curCluster++;
                     read += 1024;
                 }
             }
             uint32_t remaining = *length - read;
 
-            if(!loadedClus.count(curCluster))    // if not previously loaded, load in
-                loadedClus[curCluster] = readCluster(curCluster);
-            memcpy(&localData[read], loadedClus[curCluster], remaining);
+            if(loadedClus.count(curCluster))    // if previously loaded, use that
+                localClus = loadedClus[curCluster];
+            else
+                localClus = readCluster(curCluster);
+            memcpy(&localData[read], localClus, remaining);
+            curCluster++;
             read += remaining;
             memcpy(data, localData, read);
 
@@ -1538,7 +1533,7 @@ TVMStatus VMFileWrite(int filedescriptor, void *data, int *length)
     else {
             DirEntry *openFile = NULL;
             for(vector<DirEntry*>::iterator itr = openFileList.begin(); itr != openFileList.end(); ++itr) {
-                if((*itr)->fd == filedescriptor) {
+                if((*itr)->fd == (uint32_t)filedescriptor) {
                     openFile = (*itr);
                     break;
                 }
@@ -1555,30 +1550,24 @@ TVMStatus VMFileWrite(int filedescriptor, void *data, int *length)
 
             uint32_t curCluster = openFile->DIR_FstClusLO + written;
             char *localData = new char[*length]; //local var to copy data to/from
+            uint8_t *localClus = new uint8_t[*length];
+
             memcpy(localData, data, *length); //we copy first
 
-            cout << "cluster: " << curCluster << endl;
-
-            uint8_t *localClus = readCluster(curCluster);
-            dumpCluster(localClus, 32);
-
             if(*length > 1024) {      // for every cluster
-                for(uint32_t i = 0; i < *length/1024; ++i) {
-                    if(!loadedClus.count(curCluster))    // if not previously loaded, load in
-                        loadedClus[curCluster] = readCluster(curCluster);
+                for(uint32_t i = 0; i < (uint32_t)*length/1024; ++i) {
                     memcpy(&localClus[i * 1024], &localData[i * 1024], 1024);
+                    loadedClus[curCluster] = &localClus[i * 1024];
                     written += 1024;
                 }
             }
             uint32_t remaining = *length - written;
 
             memcpy(&localClus[written], &localData[written], remaining);
+            loadedClus[curCluster] = &localClus[written];
             written += remaining;
 
-            dumpCluster(localClus, 32);
-
             *length = written; //set length to what we have written
-
             openFile->fdOffset += written / 1024;
     }
 
