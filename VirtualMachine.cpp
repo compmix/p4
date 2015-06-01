@@ -271,7 +271,7 @@ void idleFunction(void* TCBref)
     while(1)
     {
         MachineSuspendSignals(&OldState);
-        //usleep(10000);
+        usleep(10000);
         MachineResumeSignals(&OldState);
     } //this is idling while we are in the idle state
 } //idleFunction()
@@ -566,7 +566,7 @@ void dumpROOT() {
     }
 }
 
-int parseDirEnt(uint32_t sector, vector<DirEntry*> *outDirEnt) {
+int readDirEnt(uint32_t sector, vector<DirEntry*> *outDirEnt) {
     uint8_t *rootSector = readSector(sector);   //dumpSector(rootSector, 32);
 
     for(uint32_t secOffset = 0; secOffset < 512; secOffset += 32) {      // 16 entries per sector
@@ -595,11 +595,56 @@ int parseDirEnt(uint32_t sector, vector<DirEntry*> *outDirEnt) {
     return 1;
 }
 
+int writeDirEnt(uint32_t sector, vector<DirEntry*> *inDirEnt) {
+    // for each root entry
+
+
+    for(vector<DirEntry*>::iterator itr = inDirEnt->begin(); itr != inDirEnt->end(); ++itr) {
+
+
+
+    }
+
+
+
+
+
+
+    uint8_t *rootSector;   //dumpSector(rootSector, 32);
+
+
+
+    for(uint32_t secOffset = 0; secOffset < 512; secOffset += 32) {      // 16 entries per sector
+        if(rootSector[secOffset] == 0x00)        // stop, no more entries
+            return -1;
+        if(rootSector[secOffset + 11] == ATTR_LONG_NAME)    // skip longfile names
+            continue;
+
+        DirEntry *newEntry = new DirEntry;
+        
+        VMStringCopy((char*)newEntry->DLongFileName, "");
+        VMStringCopyN((char*)newEntry->DShortFileName, (char*)&rootSector[secOffset], 11);  // store filename (short)
+        newEntry->DSize = rootSector[secOffset + 31] << 24 | rootSector[secOffset + 30] << 16 | rootSector[secOffset + 29] << 8 | rootSector[secOffset + 28];
+        newEntry->DAttributes = rootSector[secOffset + 11];        // store attribute
+        newEntry->DCreate.DHundredth = rootSector[secOffset + 13];
+        newEntry->DCreate = *parseDT(rootSector[secOffset + 17] << 8 | rootSector[secOffset + 16], rootSector[secOffset + 15] << 8 | rootSector[secOffset + 14]);
+        newEntry->DAccess = *parseDT(rootSector[secOffset + 19] << 8 | rootSector[secOffset + 18], 0);
+        newEntry->DModify = *parseDT(rootSector[secOffset + 25] << 8 | rootSector[secOffset + 24], rootSector[secOffset + 23] << 8 | rootSector[secOffset + 22]);
+
+        newEntry->DIR_FstClusLO = rootSector[secOffset + 27] << 8 | rootSector[secOffset + 26];      // store fstClusLO
+
+        inDirEnt->push_back(newEntry);    // save
+
+    } // for each entry
+
+
+    return 1;
+}
+
 void dismountFAT(){
 
     cerr << "writing clusters" << endl;
     // for every modified cluster, write out
-    int i = 0;
     for(map<uint32_t, uint8_t*>::iterator itr = loadedClus.begin(); itr != loadedClus.end(); ++itr)
     {   
         writeCluster(itr->first, itr->second);
@@ -607,17 +652,27 @@ void dismountFAT(){
 
     cerr << "writing FAT" << endl;
     //update FAT table
-    i = 0;
-    for(vector<uint16_t>::iterator itr = FATTable.begin(); itr != FATTable.end(); ++itr, ++i) {
-        uint32_t sector = i + 1;
-        uint8_t *fatSector = new uint8_t[512];
-        for(uint16_t j = 0; j < 512; ) {        // recombine a whole sector
-            fatSector[j++] = (*itr) & 0xFF;
-            fatSector[j++] = (*itr) >> 8;
+    int j = 0;
+    uint32_t sector = 1;
+    uint8_t *fatSector = new uint8_t[512];
+    for(vector<uint16_t>::iterator itr = FATTable.begin(); itr != FATTable.end(); ++itr) {
+        fatSector[j++] = (*itr) & 0xFF;
+        fatSector[j++] = (*itr) >> 8;
+
+        if(j == 512) {
+            j = 0;
+            writeSector(sector, fatSector);
+            ++sector;
         }
-        cout << i << endl;
-        writeSector(sector, fatSector);
     }
+
+    //update ROOT dir
+    for(uint32_t i = 0; i < RootDirectorySectors; ++i) {
+            uint32_t sector = i + FirstRootSector;       // starts at
+
+            if(writeDirEnt(sector, &ROOT) == -1)
+                break;
+    }   
 
     cerr << "closing fd" << endl;
 }
@@ -714,7 +769,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, int machinetickms, TVMMemo
     for(uint32_t i = 0; i < RootDirectorySectors; ++i) {
         uint32_t sector = i + FirstRootSector;       // starts at
 
-        if(parseDirEnt(sector, &ROOT) == -1)
+        if(readDirEnt(sector, &ROOT) == -1)
             break;
     }   
     //dumpROOT();
