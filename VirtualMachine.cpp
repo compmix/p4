@@ -518,6 +518,20 @@ SVMDateTime* parseDT(uint16_t rawDate, uint16_t rawTime) {
     return newDT;
 } // parseDT
 
+void rawDate(uint8_t *sector, SVMDateTime* curDT) {
+    uint16_t rawDate = (curDT->DYear - 1980) << 9 | curDT->DMonth << 5 | curDT->DDay;
+
+    sector[0] = rawDate & 0xFF;
+    sector[1] = rawDate >> 8;
+}
+
+void rawTime(uint8_t *sector, SVMDateTime* curDT) {
+    uint16_t rawTime = curDT->DHour << 11 | curDT->DMinute << 5 | curDT->DSecond / 2;
+
+    sector[0] = rawTime & 0xFF;
+    sector[1] = rawTime >> 8;
+}
+
 unsigned int bytesToUnsigned(uint8_t* BPB, uint16_t offset, uint16_t size)
 {
     unsigned int unsignedAccum = 0;
@@ -526,6 +540,29 @@ unsigned int bytesToUnsigned(uint8_t* BPB, uint16_t offset, uint16_t size)
 
     return unsignedAccum;
 } //bytesToUngned()
+
+char* parseName(char *FileName) {
+    char *shortName = new char[13];
+    int i = 0;
+
+    for( ; i < 8; ++i) {
+        if(FileName[i] > 45)
+            shortName[i] = FileName[i];
+        else
+            break;
+    }
+
+    if(FileName[8] > 64) {        // has an extension
+        shortName[i++] = '.';
+        for(int j = 0; j < 3; ++j)
+            shortName[i + j] = FileName[8 + j];
+        i++;
+    }
+
+    shortName[i] = '\0';
+
+    return shortName;
+}
 
 void dumpBPB() {
     cout << "BPB_BytsPerSec: " << BPB->bytesPerSector << endl;
@@ -595,48 +632,40 @@ int readDirEnt(uint32_t sector, vector<DirEntry*> *outDirEnt) {
     return 1;
 }
 
-int writeDirEnt(uint32_t sector, vector<DirEntry*> *inDirEnt) {
+int writeDirEnt(uint32_t sector, vector<DirEntry*> *inDirEnt, vector<DirEntry*>::iterator *itr) {
     // for each root entry
 
+    uint8_t *newSector = new uint8_t[512];
+    
+    for(uint32_t secOffset = 0; secOffset < 512; secOffset += 32) {
+        if(*itr == inDirEnt->end())
+            return -1;
 
-    for(vector<DirEntry*>::iterator itr = inDirEnt->begin(); itr != inDirEnt->end(); ++itr) {
+        DirEntry* curEntry = **itr;
 
+        VMStringCopyN((char*)&newSector[secOffset], (char*)curEntry->DShortFileName, 11);
 
+        newSector[secOffset + 11] = curEntry->DAttributes;        // store attribute
+        newSector[secOffset + 13] = curEntry->DCreate.DHundredth;
 
+        rawTime(&newSector[secOffset + 14], &curEntry->DCreate);
+        rawDate(&newSector[secOffset + 16], &curEntry->DCreate);
+        rawDate(&newSector[secOffset + 18], &curEntry->DAccess);
+        rawTime(&newSector[secOffset + 22], &curEntry->DModify);
+        rawDate(&newSector[secOffset + 24], &curEntry->DModify);
+
+        newSector[secOffset + 26] = curEntry->DIR_FstClusLO & 0xFF;
+        newSector[secOffset + 27] = curEntry->DIR_FstClusLO >> 8;
+
+        newSector[secOffset + 28] = curEntry->DSize & 0xFF;
+        newSector[secOffset + 29] = curEntry->DSize >> 8 & 0xFF;
+        newSector[secOffset + 30] = curEntry->DSize >> 16 & 0xFF;                
+        newSector[secOffset + 31] = curEntry->DSize >> 24;
+
+        ++(*itr);
     }
 
-
-
-
-
-
-    uint8_t *rootSector;   //dumpSector(rootSector, 32);
-
-
-
-    for(uint32_t secOffset = 0; secOffset < 512; secOffset += 32) {      // 16 entries per sector
-        if(rootSector[secOffset] == 0x00)        // stop, no more entries
-            return -1;
-        if(rootSector[secOffset + 11] == ATTR_LONG_NAME)    // skip longfile names
-            continue;
-
-        DirEntry *newEntry = new DirEntry;
-        
-        VMStringCopy((char*)newEntry->DLongFileName, "");
-        VMStringCopyN((char*)newEntry->DShortFileName, (char*)&rootSector[secOffset], 11);  // store filename (short)
-        newEntry->DSize = rootSector[secOffset + 31] << 24 | rootSector[secOffset + 30] << 16 | rootSector[secOffset + 29] << 8 | rootSector[secOffset + 28];
-        newEntry->DAttributes = rootSector[secOffset + 11];        // store attribute
-        newEntry->DCreate.DHundredth = rootSector[secOffset + 13];
-        newEntry->DCreate = *parseDT(rootSector[secOffset + 17] << 8 | rootSector[secOffset + 16], rootSector[secOffset + 15] << 8 | rootSector[secOffset + 14]);
-        newEntry->DAccess = *parseDT(rootSector[secOffset + 19] << 8 | rootSector[secOffset + 18], 0);
-        newEntry->DModify = *parseDT(rootSector[secOffset + 25] << 8 | rootSector[secOffset + 24], rootSector[secOffset + 23] << 8 | rootSector[secOffset + 22]);
-
-        newEntry->DIR_FstClusLO = rootSector[secOffset + 27] << 8 | rootSector[secOffset + 26];      // store fstClusLO
-
-        inDirEnt->push_back(newEntry);    // save
-
-    } // for each entry
-
+    writeSector(sector, newSector);
 
     return 1;
 }
@@ -668,11 +697,11 @@ void dismountFAT(){
 
     //update ROOT dir
     for(uint32_t i = 0; i < RootDirectorySectors; ++i) {
-            uint32_t sector = i + FirstRootSector;       // starts at
-
-            if(writeDirEnt(sector, &ROOT) == -1)
-                break;
-    }   
+        uint32_t sector = i + FirstRootSector;       // starts at
+        vector<DirEntry*>::iterator itr = ROOT.begin();
+        if(writeDirEnt(sector, &ROOT, &itr) == -1)
+            break;
+    }
 
     cerr << "closing fd" << endl;
 }
@@ -869,8 +898,8 @@ TVMStatus VMDirectoryRead(int dirdescriptor, SVMDirectoryEntryRef dirent)
         return VM_STATUS_FAILURE;
 
     // output
-    VMStringCopy(dirent->DLongFileName, (char*)currDirEntry->DLongFileName);
-    VMStringCopy(dirent->DShortFileName, (char*)currDirEntry->DShortFileName);
+    VMStringCopy(dirent->DLongFileName, (char*)currDirEntry->DLongFileName);        // empty
+    VMStringCopy(dirent->DShortFileName, parseName((char*)currDirEntry->DShortFileName));
     dirent->DSize = currDirEntry->DSize;
     dirent->DAttributes = currDirEntry->DAttributes;
     dirent->DCreate = currDirEntry->DCreate;
@@ -1386,6 +1415,29 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
     char padding[13];
     VMStringCopyN(padding, "              ", 11 - VMStringLength(fileN));
     VMStringConcatenate(fileN, padding);
+    VMStringCopy(fileN, parseName(fileN));
+
+    /*
+        char *shortName = new char[13];
+        int i = 0;
+
+        for( ; i < 8; ++i) {
+            if(FileName[i] > 45)
+                shortName[i] = FileName[i];
+            else
+                break;
+        }
+
+        if(FileName[8] > 64) {        // has an extension
+            shortName[i++] = '.';
+            for(int j = 0; j < 3; ++j)
+                shortName[i + j] = FileName[8 + j];
+            i++;
+        }
+
+        shortName[i] = '\0';
+    */
+
     cerr << "looking for file " << fileN << " in " << "/" << endl;
 
     DirEntry *newFile = NULL;
