@@ -1412,37 +1412,42 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
     if(VMStringLength(fileN) > 11)              // fail if long name
         return VM_STATUS_FAILURE;
 
-    char padding[13];
-    VMStringCopyN(padding, "              ", 11 - VMStringLength(fileN));
-    VMStringConcatenate(fileN, padding);
-    VMStringCopy(fileN, parseName(fileN));
 
-    /*
-        char *shortName = new char[13];
-        int i = 0;
+    char *shortName = new char[13], padding[13];
 
-        for( ; i < 8; ++i) {
-            if(FileName[i] > 45)
-                shortName[i] = FileName[i];
-            else
-                break;
+    int pos = strcspn(fileN, ".");
+    if(pos < 9) {          // if theres an extension
+        VMStringCopyN(shortName, fileN, pos);
+
+        VMStringCopyN(padding, "                   ", 11 - VMStringLength(shortName));
+        VMStringConcatenate(shortName, padding);
+
+        for(int j = 0; j < 3; ++j)
+            shortName[8 + j] = fileN[pos + j + 1];
+
+        for(int i = 0; i < 11; ++i) {
+            if(shortName[i] < 64)
+                shortName[i] = ' ';
         }
 
-        if(FileName[8] > 64) {        // has an extension
-            shortName[i++] = '.';
-            for(int j = 0; j < 3; ++j)
-                shortName[i + j] = FileName[8 + j];
-            i++;
+        shortName[12] = '\0';
+
+    } else {            // no extension
+        for(int i = 0; i < pos; ++i)
+            shortName[i] = fileN[i];
+
+        for(int i = 0; i < 11; ++i) {
+            if(shortName[i] < 64)
+                shortName[i] = ' ';
         }
 
-        shortName[i] = '\0';
-    */
-
-    cerr << "looking for file " << fileN << " in " << "/" << endl;
+        shortName[12] = '\0';
+    }
+    
 
     DirEntry *newFile = NULL;
     for(vector<DirEntry*>::iterator itr = ROOT.begin(); itr != ROOT.end(); ++itr){
-        if(strcmp((char*)(*itr)->DShortFileName, fileN) == 0) {
+        if(strcmp((char*)(*itr)->DShortFileName, shortName) == 0) {
             newFile = (*itr);
             cerr << fileN << " found!" << endl;
             break;
